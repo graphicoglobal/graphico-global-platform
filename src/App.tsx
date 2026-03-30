@@ -16,37 +16,49 @@ import {
   Menu,
   X,
   ChevronRight,
-  QrCode
+  QrCode,
+  Mail,
+  Lock,
+  Chrome,
+  AlertCircle
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { cn } from './lib/utils';
+import { supabase } from './lib/supabase';
 
 // --- Types ---
-interface UserData {
+interface UserProfile {
   id: string;
   email: string;
   name: string;
-  role: 'user' | 'admin';
   credits: number;
   rank: 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+  role: 'user' | 'admin';
 }
 
 interface Order {
   id: string;
-  userId: string;
-  userName: string;
-  serviceType: string;
+  user_id: string;
+  user_name: string;
+  service_type: string;
   description: string;
   cost: number;
   status: 'pending' | 'completed' | 'cancelled';
-  createdAt: string;
+  created_at: string;
 }
+
+// --- Helper Functions ---
+const calculateRank = (credits: number) => {
+  if (credits >= 5000) return "Platinum";
+  if (credits >= 2000) return "Gold";
+  if (credits >= 500) return "Silver";
+  return "Bronze";
+};
 
 // --- Components ---
 
-const Navbar = ({ user, onLogout }: { user: UserData | null, onLogout: () => void }) => {
+const Navbar = ({ profile, onLogout }: { profile: UserProfile | null, onLogout: () => void }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const navigate = useNavigate();
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/10 px-6 py-4">
@@ -60,19 +72,19 @@ const Navbar = ({ user, onLogout }: { user: UserData | null, onLogout: () => voi
           </span>
         </Link>
 
-        {user && (
+        {profile && (
           <div className="hidden md:flex items-center gap-8">
             <Link to="/dashboard" className="text-sm font-medium text-white/70 hover:text-white transition-colors">Dashboard</Link>
             <Link to="/orders" className="text-sm font-medium text-white/70 hover:text-white transition-colors">Orders</Link>
-            {user.role === 'admin' && (
+            {profile.role === 'admin' && (
               <Link to="/admin" className="text-sm font-medium text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1">
                 <ShieldCheck className="w-4 h-4" /> Admin
               </Link>
             )}
             <div className="flex items-center gap-4 pl-4 border-l border-white/10">
               <div className="flex flex-col items-end">
-                <span className="text-sm font-semibold text-white">{user.name}</span>
-                <span className="text-[10px] uppercase tracking-widest text-purple-400 font-bold">{user.rank}</span>
+                <span className="text-sm font-semibold text-white">{profile.name}</span>
+                <span className="text-[10px] uppercase tracking-widest text-purple-400 font-bold">{profile.rank}</span>
               </div>
               <button 
                 onClick={onLogout}
@@ -84,7 +96,7 @@ const Navbar = ({ user, onLogout }: { user: UserData | null, onLogout: () => voi
           </div>
         )}
 
-        {!user && (
+        {!profile && (
           <div className="flex gap-4">
             <Link to="/login" className="text-sm font-medium text-white/70 hover:text-white px-4 py-2">Login</Link>
             <Link to="/signup" className="text-sm font-medium bg-white text-black px-6 py-2 rounded-full hover:bg-white/90 transition-colors">Join Now</Link>
@@ -99,7 +111,7 @@ const Navbar = ({ user, onLogout }: { user: UserData | null, onLogout: () => voi
   );
 };
 
-const MembershipCard = ({ user }: { user: UserData }) => {
+const MembershipCard = ({ profile }: { profile: UserProfile }) => {
   const rankColors = {
     Bronze: "from-orange-700 to-orange-900",
     Silver: "from-slate-400 to-slate-600",
@@ -113,10 +125,9 @@ const MembershipCard = ({ user }: { user: UserData }) => {
       animate={{ opacity: 1, y: 0 }}
       className={cn(
         "relative w-full max-w-md aspect-[1.6/1] rounded-3xl p-8 overflow-hidden shadow-2xl",
-        "bg-gradient-to-br", rankColors[user.rank]
+        "bg-gradient-to-br", rankColors[profile.rank]
       )}
     >
-      {/* Decorative Elements */}
       <div className="absolute top-[-20%] right-[-10%] w-64 h-64 bg-white/10 rounded-full blur-3xl" />
       <div className="absolute bottom-[-20%] left-[-10%] w-48 h-48 bg-black/20 rounded-full blur-2xl" />
       
@@ -133,22 +144,22 @@ const MembershipCard = ({ user }: { user: UserData }) => {
           <div className="space-y-4">
             <div>
               <p className="text-[10px] uppercase tracking-widest text-white/50">Member Name</p>
-              <p className="text-lg font-medium text-white">{user.name}</p>
+              <p className="text-lg font-medium text-white">{profile.name}</p>
             </div>
             <div className="flex gap-8">
               <div>
                 <p className="text-[10px] uppercase tracking-widest text-white/50">Rank</p>
-                <p className="text-sm font-bold text-white">{user.rank}</p>
+                <p className="text-sm font-bold text-white">{profile.rank}</p>
               </div>
               <div>
                 <p className="text-[10px] uppercase tracking-widest text-white/50">Credits</p>
-                <p className="text-sm font-bold text-white">{user.credits}</p>
+                <p className="text-sm font-bold text-white">{profile.credits}</p>
               </div>
             </div>
           </div>
           
           <div className="bg-white p-2 rounded-xl">
-            <QRCodeSVG value={user.id} size={60} />
+            <QRCodeSVG value={profile.id} size={60} />
           </div>
         </div>
       </div>
@@ -156,34 +167,56 @@ const MembershipCard = ({ user }: { user: UserData }) => {
   );
 };
 
-const AuthPage = ({ type, onAuth }: { type: 'login' | 'signup', onAuth: (data: any) => void }) => {
+const AuthPage = ({ type }: { type: 'login' | 'signup' }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+    if (error) setError(error.message);
+    setLoading(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    const endpoint = type === 'login' ? '/api/auth/login' : '/api/auth/signup';
-    const body = type === 'login' ? { email, password } : { email, password, name };
+    setLoading(true);
 
     try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await res.json();
-      if (res.ok) {
-        onAuth(data);
-        navigate('/dashboard');
+      if (type === 'signup') {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: name
+            }
+          }
+        });
+        if (error) throw error;
+        alert('Check your email for the confirmation link!');
       } else {
-        setError(data.error);
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+        if (error) throw error;
+        navigate('/dashboard');
       }
-    } catch (err) {
-      setError('Something went wrong. Please try again.');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -202,50 +235,74 @@ const AuthPage = ({ type, onAuth }: { type: 'login' | 'signup', onAuth: (data: a
           <p className="text-white/50 text-sm">Experience the future of professional design services.</p>
         </div>
 
+        <button 
+          onClick={handleGoogleLogin}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/10 text-white font-bold py-4 rounded-2xl hover:bg-white/10 transition-all mb-6"
+        >
+          <Chrome className="w-5 h-5" />
+          Continue with Google
+        </button>
+
+        <div className="relative mb-8">
+          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
+          <div className="relative flex justify-center text-xs uppercase"><span className="bg-transparent px-2 text-white/40 font-bold">Or continue with email</span></div>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-6">
           {type === 'signup' && (
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-widest text-white/40 ml-1">Full Name</label>
-              <input 
-                type="text" 
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
-                placeholder="John Doe"
-                required
-              />
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/20" />
+                <input 
+                  type="text" 
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
+                  placeholder="John Doe"
+                  required
+                />
+              </div>
             </div>
           )}
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-widest text-white/40 ml-1">Email Address</label>
-            <input 
-              type="email" 
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
-              placeholder="name@company.com"
-              required
-            />
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/20" />
+              <input 
+                type="email" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
+                placeholder="name@company.com"
+                required
+              />
+            </div>
           </div>
           <div className="space-y-2">
             <label className="text-xs font-bold uppercase tracking-widest text-white/40 ml-1">Password</label>
-            <input 
-              type="password" 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
-              placeholder="••••••••"
-              required
-            />
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/20" />
+              <input 
+                type="password" 
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-5 py-4 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
+                placeholder="••••••••"
+                required
+              />
+            </div>
           </div>
 
           {error && <p className="text-red-400 text-xs font-medium text-center">{error}</p>}
 
           <button 
             type="submit"
-            className="w-full accent-gradient text-white font-bold py-5 rounded-2xl shadow-lg shadow-purple-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+            disabled={loading}
+            className="w-full accent-gradient text-white font-bold py-5 rounded-2xl shadow-lg shadow-purple-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
           >
-            {type === 'login' ? 'Login to Dashboard' : 'Start Your Journey'}
+            {loading ? 'Processing...' : type === 'login' ? 'Login to Dashboard' : 'Start Your Journey'}
           </button>
         </form>
 
@@ -262,7 +319,7 @@ const AuthPage = ({ type, onAuth }: { type: 'login' | 'signup', onAuth: (data: a
   );
 };
 
-const Dashboard = ({ user, setUser }: { user: UserData, setUser: (u: UserData) => void }) => {
+const Dashboard = ({ profile }: { profile: UserProfile }) => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -272,11 +329,13 @@ const Dashboard = ({ user, setUser }: { user: UserData, setUser: (u: UserData) =
 
   const fetchOrders = async () => {
     try {
-      const res = await fetch('/api/orders', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      });
-      const data = await res.json();
-      setOrders(data);
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      setOrders(data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -287,9 +346,8 @@ const Dashboard = ({ user, setUser }: { user: UserData, setUser: (u: UserData) =
   return (
     <div className="min-h-screen pt-24 pb-12 px-6 max-w-7xl mx-auto">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Profile & Card */}
         <div className="lg:col-span-1 space-y-8">
-          <MembershipCard user={user} />
+          <MembershipCard profile={profile} />
           
           <div className="glass-card rounded-3xl p-8 space-y-6">
             <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -298,11 +356,11 @@ const Dashboard = ({ user, setUser }: { user: UserData, setUser: (u: UserData) =
             <div className="space-y-4">
               <div className="flex justify-between items-center py-3 border-b border-white/5">
                 <span className="text-white/40 text-sm">Member ID</span>
-                <span className="text-white font-mono text-xs">{user.id}</span>
+                <span className="text-white font-mono text-xs">{profile.id.substring(0, 8)}...</span>
               </div>
               <div className="flex justify-between items-center py-3 border-b border-white/5">
                 <span className="text-white/40 text-sm">Email</span>
-                <span className="text-white text-sm">{user.email}</span>
+                <span className="text-white text-sm">{profile.email}</span>
               </div>
               <div className="flex justify-between items-center py-3">
                 <span className="text-white/40 text-sm">Join Date</span>
@@ -312,7 +370,6 @@ const Dashboard = ({ user, setUser }: { user: UserData, setUser: (u: UserData) =
           </div>
         </div>
 
-        {/* Right Column: Orders & Actions */}
         <div className="lg:col-span-2 space-y-8">
           <div className="flex justify-between items-center">
             <h2 className="text-3xl font-bold text-white tracking-tight">Your Orders</h2>
@@ -347,7 +404,7 @@ const Dashboard = ({ user, setUser }: { user: UserData, setUser: (u: UserData) =
                       <tr key={order.id} className="hover:bg-white/5 transition-colors group">
                         <td className="px-8 py-6">
                           <div className="flex flex-col">
-                            <span className="text-white font-bold">{order.serviceType}</span>
+                            <span className="text-white font-bold">{order.service_type}</span>
                             <span className="text-xs text-white/40 truncate max-w-[200px]">{order.description}</span>
                           </div>
                         </td>
@@ -364,7 +421,7 @@ const Dashboard = ({ user, setUser }: { user: UserData, setUser: (u: UserData) =
                           <span className="text-purple-400 font-bold">{order.cost} Cr</span>
                         </td>
                         <td className="px-8 py-6 text-white/40 text-sm">
-                          {new Date(order.createdAt).toLocaleDateString()}
+                          {new Date(order.created_at).toLocaleDateString()}
                         </td>
                       </tr>
                     ))}
@@ -379,10 +436,11 @@ const Dashboard = ({ user, setUser }: { user: UserData, setUser: (u: UserData) =
   );
 };
 
-const NewOrderPage = ({ user, setUser }: { user: UserData, setUser: (u: UserData) => void }) => {
+const NewOrderPage = ({ profile, onUpdateProfile }: { profile: UserProfile, onUpdateProfile: (p: UserProfile) => void }) => {
   const [serviceType, setServiceType] = useState('Logo Design');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const services = [
@@ -397,29 +455,42 @@ const NewOrderPage = ({ user, setUser }: { user: UserData, setUser: (u: UserData
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedService) return;
+    if (profile.credits < selectedService.cost) {
+      setError('Insufficient credits');
+      return;
+    }
 
+    setLoading(true);
     try {
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({
-          serviceType,
+      const newCredits = profile.credits - selectedService.cost;
+      const newRank = calculateRank(newCredits);
+
+      const { error: orderError } = await supabase
+        .from('orders')
+        .insert({
+          user_id: profile.id,
+          user_name: profile.name,
+          service_type: serviceType,
           description,
-          cost: selectedService.cost
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setUser({ ...user, credits: data.user.credits, rank: data.user.rank });
-        navigate('/dashboard');
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError('Failed to place order.');
+          cost: selectedService.cost,
+          status: 'pending'
+        });
+      
+      if (orderError) throw orderError;
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ credits: newCredits, rank: newRank })
+        .eq('id', profile.id);
+      
+      if (profileError) throw profileError;
+
+      onUpdateProfile({ ...profile, credits: newCredits, rank: newRank });
+      navigate('/dashboard');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -478,8 +549,8 @@ const NewOrderPage = ({ user, setUser }: { user: UserData, setUser: (u: UserData
             </div>
             <div className="text-right">
               <p className="text-xs font-bold uppercase tracking-widest text-white/40">Your Balance</p>
-              <p className={cn("text-lg font-bold", user.credits < (selectedService?.cost || 0) ? "text-red-400" : "text-purple-400")}>
-                {user.credits} Credits
+              <p className={cn("text-lg font-bold", profile.credits < (selectedService?.cost || 0) ? "text-red-400" : "text-purple-400")}>
+                {profile.credits} Credits
               </p>
             </div>
           </div>
@@ -488,10 +559,10 @@ const NewOrderPage = ({ user, setUser }: { user: UserData, setUser: (u: UserData
 
           <button 
             type="submit"
-            disabled={user.credits < (selectedService?.cost || 0)}
+            disabled={loading || profile.credits < (selectedService?.cost || 0)}
             className="w-full accent-gradient text-white font-bold py-5 rounded-2xl shadow-lg shadow-purple-500/20 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Place Order
+            {loading ? 'Processing...' : 'Place Order'}
           </button>
         </form>
       </motion.div>
@@ -500,7 +571,7 @@ const NewOrderPage = ({ user, setUser }: { user: UserData, setUser: (u: UserData
 };
 
 const AdminPanel = () => {
-  const [users, setUsers] = useState<UserData[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -510,15 +581,14 @@ const AdminPanel = () => {
 
   const fetchData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const [uRes, oRes] = await Promise.all([
-        fetch('/api/admin/users', { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch('/api/orders', { headers: { 'Authorization': `Bearer ${token}` } })
-      ]);
-      const uData = await uRes.json();
-      const oData = await oRes.json();
-      setUsers(uData);
-      setOrders(oData);
+      const { data: uData, error: uError } = await supabase.from('profiles').select('*');
+      const { data: oData, error: oError } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
+      
+      if (uError) throw uError;
+      if (oError) throw oError;
+
+      setUsers(uData || []);
+      setOrders(oData || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -528,14 +598,27 @@ const AdminPanel = () => {
 
   const updateCredits = async (userId: string, newCredits: number) => {
     try {
-      await fetch(`/api/admin/users/${userId}`, {
-        method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify({ credits: newCredits })
-      });
+      const newRank = calculateRank(newCredits);
+      const { error } = await supabase
+        .from('profiles')
+        .update({ credits: newCredits, rank: newRank })
+        .eq('id', userId);
+      
+      if (error) throw error;
+      fetchData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const updateOrderStatus = async (orderId: string, status: string) => {
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({ status })
+        .eq('id', orderId);
+      
+      if (error) throw error;
       fetchData();
     } catch (err) {
       console.error(err);
@@ -552,7 +635,6 @@ const AdminPanel = () => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-        {/* User Management */}
         <div className="space-y-6">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <User className="w-5 h-5 text-purple-400" /> User Management
@@ -597,7 +679,6 @@ const AdminPanel = () => {
           </div>
         </div>
 
-        {/* Global Orders */}
         <div className="space-y-6">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <ShoppingCart className="w-5 h-5 text-purple-400" /> Global Orders
@@ -616,20 +697,23 @@ const AdminPanel = () => {
                   <tr key={o.id} className="hover:bg-white/5 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex flex-col">
-                        <span className="text-white font-bold">{o.serviceType}</span>
+                        <span className="text-white font-bold">{o.service_type}</span>
                         <span className="text-xs text-white/40">{o.cost} Credits</span>
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-white text-sm">{o.userName}</span>
+                      <span className="text-white text-sm">{o.user_name}</span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className={cn(
-                        "px-2 py-1 rounded-full text-[9px] font-bold uppercase tracking-widest",
-                        o.status === 'pending' ? "bg-yellow-500/10 text-yellow-500" : "bg-green-500/10 text-green-500"
-                      )}>
-                        {o.status}
-                      </span>
+                      <select 
+                        value={o.status}
+                        onChange={(e) => updateOrderStatus(o.id, e.target.value)}
+                        className="bg-white/5 border border-white/10 text-[10px] text-white rounded-lg px-2 py-1 outline-none"
+                      >
+                        <option value="pending">Pending</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
                     </td>
                   </tr>
                 ))}
@@ -645,33 +729,66 @@ const AdminPanel = () => {
 // --- Main App ---
 
 export default function App() {
-  const [user, setUser] = useState<UserData | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      fetch('/api/user/me', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      .then(res => res.json())
-      .then(data => {
-        if (!data.error) setUser(data);
-      })
-      .finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          await fetchProfile(session.user.id);
+        } else {
+          setLoading(false);
+        }
+      } catch (err: any) {
+        setError(err.message);
+        setLoading(false);
+      }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        fetchProfile(session.user.id);
+      } else {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const handleAuth = (data: { token: string, user: UserData }) => {
-    localStorage.setItem('token', data.token);
-    setUser(data.user);
+  const fetchProfile = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // Profile not found, trigger might still be running
+          setTimeout(() => fetchProfile(userId), 1000);
+          return;
+        }
+        throw error;
+      }
+      setProfile(data);
+    } catch (err: any) {
+      console.error('Error fetching profile:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    setUser(null);
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
   };
 
   if (loading) {
@@ -686,14 +803,32 @@ export default function App() {
     );
   }
 
+  if (error && !profile) {
+    return (
+      <div className="min-h-screen purple-gradient flex flex-col items-center justify-center p-6 text-center">
+        <AlertCircle className="w-16 h-16 text-red-400 mb-4" />
+        <h2 className="text-2xl font-bold text-white mb-2">Configuration Required</h2>
+        <p className="text-white/50 max-w-md mb-8">
+          Please ensure your Supabase environment variables are correctly set in the Secrets panel and the database schema is applied.
+        </p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="px-8 py-3 bg-white text-black rounded-xl font-bold"
+        >
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
+
   return (
     <Router>
       <div className="min-h-screen purple-gradient text-white selection:bg-purple-500/30">
-        <Navbar user={user} onLogout={handleLogout} />
+        <Navbar profile={profile} onLogout={handleLogout} />
         
         <Routes>
           <Route path="/" element={
-            user ? <Navigate to="/dashboard" /> : (
+            profile ? <Navigate to="/dashboard" /> : (
               <div className="pt-32 px-6 max-w-7xl mx-auto text-center space-y-12">
                 <motion.div
                   initial={{ opacity: 0, y: 30 }}
@@ -746,12 +881,12 @@ export default function App() {
             )
           } />
           
-          <Route path="/login" element={!user ? <AuthPage type="login" onAuth={handleAuth} /> : <Navigate to="/dashboard" />} />
-          <Route path="/signup" element={!user ? <AuthPage type="signup" onAuth={handleAuth} /> : <Navigate to="/dashboard" />} />
+          <Route path="/login" element={!profile ? <AuthPage type="login" /> : <Navigate to="/dashboard" />} />
+          <Route path="/signup" element={!profile ? <AuthPage type="signup" /> : <Navigate to="/dashboard" />} />
           
-          <Route path="/dashboard" element={user ? <Dashboard user={user} setUser={setUser} /> : <Navigate to="/login" />} />
-          <Route path="/order-new" element={user ? <NewOrderPage user={user} setUser={setUser} /> : <Navigate to="/login" />} />
-          <Route path="/admin" element={user?.role === 'admin' ? <AdminPanel /> : <Navigate to="/dashboard" />} />
+          <Route path="/dashboard" element={profile ? <Dashboard profile={profile} /> : <Navigate to="/login" />} />
+          <Route path="/order-new" element={profile ? <NewOrderPage profile={profile} onUpdateProfile={setProfile} /> : <Navigate to="/login" />} />
+          <Route path="/admin" element={profile?.role === 'admin' ? <AdminPanel /> : <Navigate to="/dashboard" />} />
           
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
