@@ -11,7 +11,18 @@ CREATE TABLE profiles (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 2. Orders Table
+-- 2. Designs Table (New)
+CREATE TABLE designs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  image_url TEXT NOT NULL,
+  price INTEGER NOT NULL,
+  category TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 3. Orders Table
 CREATE TABLE orders (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users ON DELETE CASCADE NOT NULL,
@@ -23,11 +34,12 @@ CREATE TABLE orders (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 3. Enable Row Level Security (RLS)
+-- 4. Enable Row Level Security (RLS)
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE designs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 
--- 4. Policies for Profiles
+-- 5. Policies for Profiles
 CREATE POLICY "Users can view their own profile" ON profiles
   FOR SELECT USING (auth.uid() = id);
 
@@ -48,7 +60,18 @@ CREATE POLICY "Admins can update all profiles" ON profiles
     )
   );
 
--- 5. Policies for Orders
+-- 6. Policies for Designs
+CREATE POLICY "Anyone can view designs" ON designs
+  FOR SELECT USING (true);
+
+CREATE POLICY "Admins can manage designs" ON designs
+  FOR ALL USING (
+    EXISTS (
+      SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
+    )
+  );
+
+-- 7. Policies for Orders
 CREATE POLICY "Users can view their own orders" ON orders
   FOR SELECT USING (auth.uid() = user_id);
 
@@ -62,14 +85,7 @@ CREATE POLICY "Admins can view all orders" ON orders
     )
   );
 
-CREATE POLICY "Admins can update all orders" ON orders
-  FOR UPDATE USING (
-    EXISTS (
-      SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'
-    )
-  );
-
--- 6. Trigger to create profile on signup
+-- 8. Trigger to create profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -80,7 +96,7 @@ BEGIN
     new.email, 
     100, 
     'Bronze',
-    'user'
+    CASE WHEN new.email = 'graphicoglobal@gmail.com' THEN 'admin' ELSE 'user' END
   );
   RETURN new;
 END;
